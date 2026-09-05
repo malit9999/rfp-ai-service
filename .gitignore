@@ -1,0 +1,22 @@
+# 환경 변수 — 실제 키가 들어가는 파일은 절대 커밋하지 않는다
+.env
+.env.*
+!.env.example
+
+# 파이썬
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# 인덱스·데이터 — 원문 문서와 벡터 인덱스는 저장소에 두지 않는다
+data/
+index/
+*.sqlite3
+
+# macOS
+.DS_Store
+._*

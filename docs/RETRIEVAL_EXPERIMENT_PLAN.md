@@ -260,37 +260,72 @@ normalization_version: <공백·줄바꿈·유니코드 정규화 규칙 버전>
       extracted_text_sha256: "…"
       extractor_version: "…"
       normalization_version: "…"
-      page: 12
+      page: null            # HWPX 본문 XML에 쪽 경계가 없다 (추출 계약 §2.3)
       section: "3.2 예산"
       char_start: 8450
       char_end: 8612
-      relevance_grade: 2   # 2=직접 답, 1=부분 근거, 0=무관
+      relevance_grade: 2    # 2=직접 답, 1=부분 근거. **0은 쓰지 않는다**
 ```
 
-### 4.1 겹침 판정 — 느슨한 기준과 엄격한 기준을 따로 보고한다
+### 4.1 라벨 작성 규칙
 
-검색된 chunk의 `[char_start, char_end)` 와 정답 `[char_start, char_end)` 의 겹침으로 판정한다.
-**두 기준을 각각 계산하고, 합치거나 평균 내지 않는다.**
+**strict 지표에 맞추려고 ground truth 를 자르지 않는다.** 지표가 라벨을 왜곡하면
+평가가 아니라 자기충족이 된다.
+
+- evidence 길이를 **인위적으로 제한하지 않는다** (400자 같은 상한을 두지 않는다)
+- 답을 뒷받침하는 **최소한의 완결된 의미 단위**로 라벨링한다
+- **논리적으로 독립된 근거일 때만** 여러 span으로 나눈다. 길이를 줄이려고 쪼개지 않는다
+- `relevance_grade` 는 **1 또는 2만** 쓴다. 무관하면 라벨하지 않는다(0을 쓰지 않는다)
+- 결과에 **evidence 길이와 span 수를 함께 기록한다**
+
+### 4.2 겹침 판정 — 느슨한 기준과 엄격한 기준을 따로 보고한다
 
 | 기준 | 정의 | 성격 |
 |---|---|---|
 | `overlap_any` | 1자라도 겹치면 적중 | 느슨 |
 | `overlap_ratio ≥ 0.5` | 정답 구간의 절반 이상을 덮으면 적중 | 엄격 |
 
-`overlap_ratio`의 **분모는 정답 evidence 구간의 길이**다 —
-`|겹침| / (evidence.char_end - evidence.char_start)` 이고 IoU가 아니다.
-큰 chunk가 작은 정답 구간을 통째로 덮으면 값이 1.0이 된다. 그래서 두 기준을 함께 보고,
-결과표에 **평균 chunk 길이**와 **평균 검색 컨텍스트 길이**(상위 k개 chunk 길이의 합)를
-반드시 함께 적는다. 청크를 키워서 적중률을 올린 것인지 구분할 수 있어야 한다.
+두 기준을 각각 계산하고 **합치거나 평균 내지 않는다.**
+`overlap_ratio` 의 분모는 **정답 evidence 구간의 길이**이고 IoU가 아니다.
 
-### 4.2 이진 판정 기준
+겹침은 `document_id` 와 `extracted_text_sha256` 이 **모두 같을 때만** 인정한다.
+같은 문서인데 해시가 다르면 좌표를 비교할 수 없으므로 **계산을 중단한다.**
 
-`relevance_grade ≥ 1` 을 적중으로 본다.
-`Recall@k` · `Precision@k` · `Hit@k` · `MRR` 은 이 기준을 쓰고,
-`nDCG@k` 만 등급(2 / 1 / 0)을 이득으로 그대로 쓴다.
-이 문장이 없으면 같은 `metrics.json`에서 서로 다른 수치가 나온다.
+### 4.3 chunk qrel 변환
 
-### 4.3 평가셋 동결과 수정
+순위 지표는 evidence 좌표를 **현재 chunker 의 chunk 단위 qrel 로 변환한 뒤** 계산한다.
+
+```
+R_any    = { c : ∃e, overlap(c,e) > 0 }
+R_strict = { c : ∃e, overlap(c,e) / |e| ≥ 0.5 }
+grade(c) = max{ e.relevance_grade : criterion(c,e) 통과 }   (없으면 0)
+```
+
+좌표 기준으로 직접 계산하면 **같은 evidence 를 덮는 chunk 가 여러 개일 때 nDCG 가 1을 넘는다.**
+qrel 변환이 그것을 막는다. 대가로 **순위 지표는 chunker 에 묶인다** — 같은
+`chunker_version` 안에서만 비교하고, chunker 가 다른 비교에는 `EvidenceCoverage@k` 를 쓴다.
+
+### 4.4 strict 도달 가능성 (reachability)
+
+`C0` 는 chunk 500자다. 따라서 evidence 가 1,000자를 넘으면 어떤 단일 chunk 도 절반을
+덮을 수 없어 **strict 적중이 구조적으로 불가능**하다. 검색기 성능과 무관한 한계다.
+
+라벨을 자르지 않기로 했으므로, 이 경우는 **task 수준에서 먼저 판정한다.**
+
+- `strict_reachable = false`
+- 해당 문항의 strict `Hit` · `Precision` · `MRR` · `nDCG` 는 **모두 `None`**
+- strict macro 평균에서 **제외**
+- `strict_reachable_count / answerable_count` 와 `strict_reachability_rate` 를 **반드시 함께 보고**
+- 지표별로 예외 처리하지 않는다. `IDCG@k == 0` 도 따로 다루지 않고 이 판정이 먼저 걸린다
+
+**`EvidenceCoverage@k` 는 모든 answerable 문항을 계속 포함한다.** 그래서 청킹 때문에
+근거를 충분히 담지 못한 문제가 Coverage 에서 숨겨지지 않는다.
+
+반대로 answerable 문항인데 **any qrel 까지 0개면 결과가 아니라 자료 오류**다.
+`None` 으로 넘어가지 않고 좌표·`document_id`·`extracted_text_sha256`·chunk 커버리지 문제로
+보고 **계산을 중단한다.**
+
+### 4.5 평가셋 동결과 수정
 
 질문도 라벨도 같은 사람이 만들고, 그다음에 검색 결과를 본다.
 결과를 본 뒤 라벨을 손대면 수치가 오염되므로 순서를 규칙으로 고정한다.
@@ -298,33 +333,50 @@ normalization_version: <공백·줄바꿈·유니코드 정규화 규칙 버전>
 1. 질문과 정답 라벨을 **원문만 보고** 작성한다. 이 단계에서 검색기를 돌리지 않는다
 2. 평가셋을 커밋한다 — 이 커밋이 **동결 시점**이다
 3. 그 뒤에 첫 측정을 실행한다
-4. 결과에는 **평가셋 커밋 해시와 측정 커밋 해시를 함께 적는다.**
-   두 해시의 순서로 "라벨이 결과보다 먼저였다"가 검증 가능해진다
+4. 결과에는 **평가셋 커밋 해시와 측정 커밋 해시를 함께 적는다**
 
-**오류를 발견해도 기존 버전을 덮어쓰지 않는다.**
+**오류를 발견해도 기존 버전을 덮어쓰지 않는다.** `evalset_version` 을 올리고
+`docs/EVALSET_CHANGELOG.md` 에 이유를 적은 뒤 필요한 실험을 다시 측정한다.
+다른 `evalset_version` 의 결과를 같은 열에서 비교하지 않는다.
 
-- `evalset_version`을 올린다 (`rfp-demo-eval-v1` → `v2`)
-- `docs/EVALSET_CHANGELOG.md`에 **무엇을 왜 고쳤는지** 적는다
-- 새 버전으로 필요한 실험을 다시 측정한다
-- **다른 `evalset_version`의 결과를 같은 열에서 비교하지 않는다.**
-  옛 버전 결과도 지우지 않고 남긴다
-
-### 4.4 규모
+### 4.6 규모
 
 질문 20~30개. 유형 배분을 먼저 정하고 라벨링한다.
 이 규모는 **파일럿 평가셋**이다 — §5.4의 해석 규칙을 반드시 함께 적용한다.
 
-## 5. 지표
+## 5. 지표 `metrics-v1`
+
+구현은 `evaluation/` 패키지에 있고 회귀 테스트는 `tests/test_metrics.py` 다.
 
 ### 5.1 답변 가능한 질문 (single · followup · filter)
 
-`k ∈ {1, 3, 5, 10}` 에서 전부 계산한다. 겹침 기준 두 가지 각각에 대해 계산한다.
+`k ∈ {1, 3, 5, 10}`. 순위 지표는 **기준별로 각각** 계산한다.
 
-- `Recall@k` — 정답 evidence 중 덮인 비율
-- `Precision@k` — 반환한 chunk 중 정답과 겹치는 비율
-- `Hit@k` — 상위 k에 정답이 하나라도 있으면 1
-- `MRR` — 첫 정답의 역순위
-- `nDCG@k` — `relevance_grade`를 이득으로 사용
+| 지표 | 정의 | 기준별 | chunker 의존 |
+|---|---|---|---|
+| `EvidenceCoverage@k` | `\|(⋃ 상위 k chunk 구간) ∩ (⋃ evidence 구간)\| / \|⋃ evidence 구간\|` | **단일 값** | 아니오 |
+| `Hit@k` | 상위 k에 qrel 적중이 하나라도 있으면 1 | any / strict | 예 |
+| `Precision@k` | 적중 chunk 수 / **`k`** | any / strict | 예 |
+| `MRR` | 첫 적중의 역순위 (없으면 0) | any / strict | 예 |
+| `nDCG@k` | `DCG@k / IDCG@k`, `DCG = Σ (2^grade − 1)/log₂(rank+1)` | any / strict | 예 |
+| `returned_count@k` | `min(k, len(검색 결과))` | 단일 값 | — |
+
+- **`Recall@k` 와 `ChunkRecall@k` 는 만들지 않는다.** 분모가 청킹에 따라 변해
+  `chunker_version` 을 넘는 비교가 성립하지 않는다. 커버리지는 `EvidenceCoverage@k` 로 잰다
+- `Precision@k` 분모는 **`k` 로 고정**한다. 반환이 부족한 경우도 결과에 반영되고,
+  그 사실은 `returned_count@k` 로 따로 보고한다. 의도적 기권은 §5.2로 분리한다
+- `IDCG@k` 는 해당 기준의 **qrel 전체 grade 를 내림차순 정렬해** 상위 k개로 계산한다
+- 여러 evidence span 은 **합집합 길이**로 계산한다
+- 결과표에 **평균 chunk 길이**와 **평균 검색 컨텍스트 길이**를 함께 적는다
+
+### 5.1.1 입력 검증 (통과하지 못하면 계산하지 않는다)
+
+`chunk_id` 중복 · 검색 결과 내 `chunk_id` 중복 · `Ranking.qid ≠ Question.qid` ·
+`char_start < 0` · `relevance_grade ∉ {1,2}` · `k` 가 양의 정수가 아니거나 중복 ·
+순위에 없는 `chunk_id` · 답변불가 문항의 순위 평가 투입 — 전부 `EvalDataError` 로 중단한다.
+
+검색 결과에 같은 chunk 가 두 번 들어오면 DCG 에 같은 근거가 두 번 더해져 nDCG 가
+부풀려지므로, **`Ranking` 생성 단계에서 거부**한다.
 
 ### 5.2 답변불가 질문 — 평균에 섞지 않는다
 
@@ -362,6 +414,11 @@ R0·R1은 TF·IDF 규모이고 RRF 점수는 `1/(k+rank)` 규모라 자릿수가
 - 결과표마다 다음을 함께 적는다 —
   `experiment_id` · 토큰화 방식 · 겹침 기준 · 평균 chunk 길이 · 평균 검색 컨텍스트 길이 ·
   `evalset_version` · 평가셋 커밋 해시 · 측정 커밋 해시
+- **제외된 문항 수와 분모(n)를 표시하지 않은 macro 평균은 출력하지 않는다.**
+  구현에서 평균은 값 하나로 존재하지 않고 `Mean(value, n, excluded)` 로만 만들어지며,
+  포맷터가 그 셋을 항상 함께 찍는다
+- `strict_reachable_count / answerable_count` 와 `strict_reachability_rate` 를 함께 적는다.
+  strict 수치는 부분집합 위의 조건부 값이므로 reachability 없이 읽을 수 없다
 
 ### 5.4 통계 해석 — 파일럿 규모의 한계
 
@@ -395,7 +452,7 @@ evidence/<experiment_id>/
 3. 청킹 구현 (`char_start`/`char_end` 포함) · 기준선 `C0 = fixed-500-overlap-80-v1`
 4. 질문 20~30개 작성 · 원문 evidence 좌표로 라벨링 — **검색기를 돌리지 않는다**
 5. **평가셋 커밋·동결** (§4.3)
-6. 평가 스크립트 구현 (§5 지표 전부 · θ sweep 포함)
+6. ~~평가 스크립트 구현~~ — **`metrics-v1` 완료** (`evaluation/`, 테스트 47개). θ sweep 은 §5.2로 남음
 7. **R0 `keyword` 기준선 측정**
 8. R1a `bm25-simple` 구현·측정
 9. R1b `bm25-ko` 구현·측정

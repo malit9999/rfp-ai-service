@@ -20,3 +20,8 @@ index/
 # macOS
 .DS_Store
 ._*
+
+# 평가용 원문 자료 — 이용 조건이 확인되기 전까지 저장소에 넣지 않는다.
+# 기록은 docs/CORPUS_RFP_DEMO_V1.md 에 URL·취득일·파일명·SHA-256·상태만 남긴다.
+data/raw/
+data/extracted/

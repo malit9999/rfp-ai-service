@@ -1,30 +1,36 @@
 # rfp-service
 
-RFP 질의응답을 **서비스로 만들기 위한 최소 골격**입니다.
-부트캠프 팀 프로젝트(RFP-AI)에서 확인한 구조를 개인 작업으로 다시 세우는 첫 단계입니다.
-**팀 저장소 코드를 옮겨 오지 않았습니다** — 이 저장소의 코드는 2026-09-05에 새로 작성했습니다.
+> **2026-09-05에 새로 작성한 개인 확장 API 프로토타입입니다.**
+> 부트캠프 팀 프로젝트(RFP-AI)에서 확인한 구조를 개인 작업으로 다시 세우는 첫 단계이며,
+> **팀 저장소 코드를 옮겨 오지 않았습니다** — 이 저장소의 코드는 빈 저장소에서 새로 썼습니다.
+> 운영용 서비스가 아니라 계약(스키마·상태 보고)을 먼저 고정하려는 골격입니다.
 
-## 지금 되는 것
+공공입찰 제안요청서(RFP) 질의응답을 서비스로 만들기 위한 최소 골격입니다.
 
-| 엔드포인트 | 하는 일 | 과금 |
-|---|---|---|
-| `GET /health` | 구성 요소별 상태를 그대로 보고 (`ready` / `not_implemented` / `disabled`) | 없음 |
-| `POST /retrieve` | 질문 → 근거 chunk 목록 (문서명·chunk id·점수 포함) | 없음 |
-| `POST /ask` | 질문 → 근거 + 답변 상태 | 없음 |
+## 구현 상태
 
-## 아직 없는 것
+| 구성 | 상태 |
+|---|---|
+| Keyword retrieval | **구현됨** (유일하게 동작하는 검색기) |
+| Dense retrieval | **미구현** — 이름만 있고 요청하면 503 |
+| Hybrid retrieval | **미구현** — 이름만 있고 요청하면 503 |
+| Reranker | **미구현** — 재정렬 단계 없음 |
+| LLM 답변 생성기 | **미구현** — `answer`는 항상 `null` |
+| HWP · PDF 표 추출 | **미구현** — `.txt` / `.md`만 읽음 |
 
-의도적으로 비워 둔 자리입니다. 숨기지 않고 `/health`와 응답에 드러납니다.
+Keyword 검색기는 BM25가 아니라 **토큰 겹침 + 문서 빈도 역가중**입니다.
+파이프라인이 실제로 통하는지 확인하려는 것이지 검색 성능을 주장하는 코드가 아닙니다.
 
-- **Dense · Hybrid 검색** — 이름만 있고 구현이 없습니다. `RFP_RETRIEVER=dense`로 두면
-  조용히 keyword로 떨어지지 않고 요청이 **503**으로 끊깁니다.
-- **Reranker** — 재정렬 단계가 없습니다. `/health`에 `not_implemented`로 나옵니다.
-- **답변 생성** — 생성기가 붙기 전까지 `/ask`의 `answer`는 항상 `null`이고
-  `answer_status`가 `evidence_only`입니다. 근거 없이 문장을 만드는 경로는 두지 않았습니다.
-- **HWP · PDF 표 추출** — 지금 로더는 `.txt` / `.md`를 한 파일 = 한 chunk로 읽습니다.
+## 설계 정책 — 없는 것을 있는 것처럼 보이지 않게
 
-기준 검색기(`keyword`)는 BM25가 아니라 토큰 겹침 + 문서 빈도 역가중입니다.
-파이프라인이 통하는지 확인하려는 것이지 검색 성능을 주장하려는 것이 아닙니다.
+1. **생성기가 없으면 `answer`는 `null`** — 근거 없이 문장을 만드는 경로 자체를 두지 않았습니다.
+   근거를 찾은 경우 `answer_status: "evidence_only"`, 못 찾은 경우 `"no_evidence"`로 구분합니다.
+2. **미구현 구성이 하나라도 있으면 `/health`는 `ok`가 아니라 `degraded`** 입니다.
+   구성 요소마다 `ready` / `not_implemented` / `disabled`를 그대로 보고합니다.
+3. **지원하지 않는 retriever를 요청하면 503** — 조용히 keyword로 폴백하지 않습니다.
+   화면에는 결과가 뜨는데 실제로는 다른 검색기가 도는 상태를 만들지 않으려는 것입니다.
+4. **오류 응답은 고정 문구만** — 예외 원문·내부 경로·설정값을 싣지 않습니다.
+5. **설정 객체에 API 키 값을 담지 않습니다** — 존재 여부(`has_answer_key`)만 남깁니다.
 
 ## 실행
 
@@ -35,26 +41,111 @@ cp .env.example .env          # 키 없이도 그대로 뜬다
 uvicorn app.main:app --reload --port 8000
 ```
 
-문서를 넣으려면 `.env`의 `RFP_CORPUS_DIR`에 `.txt`/`.md`가 든 디렉터리를 지정합니다.
-비워 두면 빈 색인으로 뜨고, `/ask`는 `answer_status: "no_evidence"`를 돌려줍니다.
+문서를 넣으려면 `.env`의 `RFP_CORPUS_DIR`에 `.txt` / `.md`가 든 디렉터리를 지정합니다.
+비워 두면 빈 색인으로 뜹니다.
+
+## API
+
+### `GET /health`
 
 ```bash
 curl -s localhost:8000/health
+```
+
+```json
+{
+  "status": "degraded",
+  "service": "rfp-service",
+  "components": [
+    { "name": "retriever:keyword", "status": "ready", "detail": "indexed_chunks=2" },
+    { "name": "reranker", "status": "not_implemented", "detail": "검색 후보 재정렬 단계가 아직 없습니다." },
+    { "name": "generation", "status": "disabled", "detail": "답변 생성기가 연결되지 않아 근거만 돌려줍니다." }
+  ]
+}
+```
+
+### `POST /retrieve`
+
+```bash
 curl -s -X POST localhost:8000/retrieve \
-  -H 'content-type: application/json' -d '{"query":"예산 총액","top_k":3}'
+  -H 'content-type: application/json' \
+  -d '{"query": "예산 총액", "top_k": 2}'
+```
+
+```json
+{
+  "query": "예산 총액",
+  "retriever": "keyword",
+  "top_k": 2,
+  "chunks": [
+    {
+      "chunk_id": "budget#0",
+      "document": "budget.txt",
+      "kind": "text",
+      "score": 0.086643,
+      "text": "본 사업의 예산 총액은 3억원이며, 부가세를 포함한 금액이다."
+    }
+  ]
+}
+```
+
+`RFP_RETRIEVER=dense`(또는 `hybrid`)로 띄운 뒤 같은 요청을 보내면 **503**입니다.
+
+```json
+{ "detail": "요청한 검색기는 아직 구현되지 않았습니다." }
+```
+
+### `POST /ask`
+
+근거를 찾은 경우 — `answer`는 `null`이고 근거만 돌려줍니다.
+
+```bash
+curl -s -X POST localhost:8000/ask \
+  -H 'content-type: application/json' \
+  -d '{"query": "평가 배점"}'
+```
+
+```json
+{
+  "query": "평가 배점",
+  "answer": null,
+  "answer_status": "evidence_only",
+  "evidence": [
+    {
+      "chunk_id": "evaluation#0",
+      "document": "evaluation.md",
+      "kind": "text",
+      "score": 0.099021,
+      "text": "평가 배점은 기술 80점, 가격 20점으로 한다."
+    }
+  ],
+  "notes": ["답변 생성기가 연결되지 않아 근거만 돌려줍니다."]
+}
+```
+
+근거를 못 찾은 경우 — 빈 결과를 오류로 만들지 않습니다.
+
+```json
+{
+  "query": "항공권 예약",
+  "answer": null,
+  "answer_status": "no_evidence",
+  "evidence": [],
+  "notes": ["질문에 해당하는 근거를 색인에서 찾지 못했습니다."]
+}
 ```
 
 ## 테스트
 
 ```bash
 pip install -r requirements.txt
-pytest -q
+pytest -q     # 26 passed
 ```
 
 외부 API·네트워크·모델 다운로드를 쓰지 않습니다. 키가 없어도 전부 돕니다.
+CI(GitHub Actions)도 같은 명령을 비밀값 없이 실행합니다.
 
 ## 다루지 않는 것
 
 - 인증·rate limit이 없습니다. 기본 바인딩은 로컬입니다.
-- 원문 문서와 색인은 저장소에 두지 않습니다(`.gitignore`의 `data/`·`index/`).
-- 오류 응답은 고정 문구만 돌려줍니다 — 예외 원문·내부 경로·설정값을 싣지 않습니다.
+- 원문 문서와 색인은 저장소에 두지 않습니다(`.gitignore`의 `data/` · `index/`).

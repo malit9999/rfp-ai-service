@@ -1,0 +1,36 @@
+name: tests
+
+# 외부 API·네트워크·비밀값을 쓰지 않는다. 의존성 설치와 pytest 뿐이다.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # 로컬에서 3.12.13으로 검증한 버전에 고정
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        # 키가 설정돼 있으면 테스트가 다른 경로를 타므로 명시적으로 비운다
+        env:
+          OPENAI_API_KEY: ""
+          RFP_ANSWER_MODEL: ""
+          RFP_CORPUS_DIR: ""
+        run: pytest -q

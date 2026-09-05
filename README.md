@@ -15,7 +15,7 @@
 | Dense retrieval | **미구현** — 이름만 있고 요청하면 503 |
 | Hybrid retrieval | **미구현** — 이름만 있고 요청하면 503 |
 | Reranker | **미구현** — 재정렬 단계 없음 |
-| LLM 답변 생성기 | **미구현** — `answer`는 항상 `null` |
+| LLM 답변 생성기 | **미구현** — `answer`는 항상 `null`, `/health`도 항상 `not_implemented` |
 | HWP · PDF 표 추출 | **미구현** — `.txt` / `.md`만 읽음 |
 
 Keyword 검색기는 BM25가 아니라 **토큰 겹침 + 문서 빈도 역가중**입니다.
@@ -26,7 +26,12 @@ Keyword 검색기는 BM25가 아니라 **토큰 겹침 + 문서 빈도 역가중
 1. **생성기가 없으면 `answer`는 `null`** — 근거 없이 문장을 만드는 경로 자체를 두지 않았습니다.
    근거를 찾은 경우 `answer_status: "evidence_only"`, 못 찾은 경우 `"no_evidence"`로 구분합니다.
 2. **미구현 구성이 하나라도 있으면 `/health`는 `ok`가 아니라 `degraded`** 입니다.
-   구성 요소마다 `ready` / `not_implemented` / `disabled`를 그대로 보고합니다.
+   지금 실제로 나오는 값은 `ready`와 `not_implemented` 둘뿐입니다
+   (`disabled`는 "구현은 됐지만 꺼 둔 상태"를 위해 스키마에만 남겨 둔 값입니다).
+   **환경 변수가 채워져 있다고 해서 ready가 되지 않습니다** — `OPENAI_API_KEY`와
+   `RFP_ANSWER_MODEL`을 둘 다 넣어도 생성기는 `not_implemented`입니다. 설정이 있다는 것은
+   코드가 있다는 뜻이 아니고, 값만 보고 ready로 보고하면 `/ask`의 실제 동작과 어긋납니다.
+   서비스는 이 두 값을 **읽지도 않습니다.**
 3. **지원하지 않는 retriever를 요청하면 503** — 조용히 keyword로 폴백하지 않습니다.
    화면에는 결과가 뜨는데 실제로는 다른 검색기가 도는 상태를 만들지 않으려는 것입니다.
 4. **오류 응답은 고정 문구만** — 예외 원문·내부 경로·설정값을 싣지 않습니다.
@@ -59,7 +64,7 @@ curl -s localhost:8000/health
   "components": [
     { "name": "retriever:keyword", "status": "ready", "detail": "indexed_chunks=2" },
     { "name": "reranker", "status": "not_implemented", "detail": "검색 후보 재정렬 단계가 아직 없습니다." },
-    { "name": "generation", "status": "disabled", "detail": "답변 생성기가 연결되지 않아 근거만 돌려줍니다." }
+    { "name": "generation", "status": "not_implemented", "detail": "답변 생성기가 아직 구현되지 않아 근거만 돌려줍니다." }
   ]
 }
 ```
@@ -119,7 +124,7 @@ curl -s -X POST localhost:8000/ask \
       "text": "평가 배점은 기술 80점, 가격 20점으로 한다."
     }
   ],
-  "notes": ["답변 생성기가 연결되지 않아 근거만 돌려줍니다."]
+  "notes": ["답변 생성기가 아직 구현되지 않아 근거만 돌려줍니다."]
 }
 ```
 
@@ -139,7 +144,7 @@ curl -s -X POST localhost:8000/ask \
 
 ```bash
 pip install -r requirements.txt
-pytest -q     # 26 passed
+pytest -q     # 27 passed
 ```
 
 외부 API·네트워크·모델 다운로드를 쓰지 않습니다. 키가 없어도 전부 돕니다.

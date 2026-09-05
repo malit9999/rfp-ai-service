@@ -26,20 +26,19 @@ class Settings:
     top_k: int = 5
     max_top_k: int = 20
     corpus_dir: str = ""
-    answer_model: str = ""
-    has_answer_key: bool = False
 
     @property
     def retriever_implemented(self) -> bool:
         return self.retriever in IMPLEMENTED_RETRIEVERS
 
-    @property
-    def generation_enabled(self) -> bool:
-        """답변 생성은 키와 모델이 둘 다 있을 때만 켠다. 지금은 어느 쪽도 붙어 있지 않다."""
-        return bool(self.has_answer_key and self.answer_model)
-
 
 def load_settings() -> Settings:
+    """환경 변수에서 설정을 읽는다.
+
+    답변 생성 관련 값(API 키·모델명)은 **읽지 않는다.** 생성기가 아직 없어서
+    읽어도 쓸 곳이 없고, 값이 있다는 이유로 기능이 있는 것처럼 보고하게 되기 때문이다.
+    생성기를 실제로 붙일 때 그 코드와 함께 추가한다.
+    """
     max_top_k = _int_env("RFP_MAX_TOP_K", 20)
     top_k = min(_int_env("RFP_TOP_K", 5), max_top_k)
     return Settings(
@@ -48,7 +47,4 @@ def load_settings() -> Settings:
         top_k=top_k,
         max_top_k=max_top_k,
         corpus_dir=os.getenv("RFP_CORPUS_DIR", ""),
-        answer_model=os.getenv("RFP_ANSWER_MODEL", "").strip(),
-        # 키 값 자체는 읽어서 어디에도 넘기지 않는다. 있는지 여부만 본다.
-        has_answer_key=bool(os.getenv("OPENAI_API_KEY", "").strip()),
     )

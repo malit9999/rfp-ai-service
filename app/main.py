@@ -23,7 +23,7 @@ from app.schemas import (
     RetrieveResponse,
 )
 
-GENERATION_NOT_WIRED = "답변 생성기가 연결되지 않아 근거만 돌려줍니다."
+GENERATION_NOT_WIRED = "답변 생성기가 아직 구현되지 않아 근거만 돌려줍니다."
 NO_EVIDENCE = "질문에 해당하는 근거를 색인에서 찾지 못했습니다."
 
 
@@ -68,9 +68,11 @@ def create_app(settings: Settings | None = None, chunks: list[Chunk] | None = No
                 detail="검색 후보 재정렬 단계가 아직 없습니다.",
             ),
             HealthComponent(
+                # 생성기는 코드가 없다. 환경 변수가 채워져 있어도 ready가 되지 않는다 —
+                # /ask가 항상 answer: null 인 현재 동작과 상태 보고가 어긋나면 안 된다.
                 name="generation",
-                status="ready" if settings.generation_enabled else "disabled",
-                detail="" if settings.generation_enabled else GENERATION_NOT_WIRED,
+                status="not_implemented",
+                detail=GENERATION_NOT_WIRED,
             ),
         ]
         degraded = any(c.status != "ready" for c in components)

@@ -26,8 +26,11 @@ status: not_acquired      # not_acquired → acquired → extracted → labeled
 | 형식 | HWPX |
 | 취득일 | **미취득** |
 | `document_sha256` | **미취득** |
-| 페이지 수 | **미확인** (파일을 열어야 확인 가능) |
+| 페이지 수 | `unknown` — HWPX 본문 XML에 쪽 경계가 없다 ([추출 계약 §2.3](EXTRACTION_CONTRACT.md)) |
 | 문서 상태 | `not_acquired` |
+| `extractor_version` | `hwpx-owpml-v1` (구현 완료, **실제 문서로 미검증**) |
+| `normalization_version` | `norm-v1` (구현 완료, **실제 문서로 미검증**) |
+| `extracted_text_sha256` | **미추출** |
 
 같은 공고에 `공고서(...).hwpx`(첨부 1번)도 있으나, 이번 코퍼스에는 **제안요청서(첨부 2번)만** 넣는다.
 
@@ -98,7 +101,14 @@ status: not_acquired      # not_acquired → acquired → extracted → labeled
    ```bash
    shasum -a 256 data/raw/doc-001.hwpx
    ```
-5. 위 §2 표의 `취득일` · `document_sha256` · `페이지 수` · `문서 상태`를 채운다
+5. 검사·추출을 돌린다 — **문서 내용은 출력하지 않고 해시만 찍는다**
+   ```bash
+   python tools/extract_doc.py data/raw/doc-001.hwpx
+   ```
+6. 출력된 `document_sha256` · `extracted_text_sha256` · 구조 검사 결과로 위 §2 표를 채우고,
+   `문서 상태`를 `extracted` 로 올린다
+7. [추출 계약 §4](EXTRACTION_CONTRACT.md)의 육안 대조 체크리스트 11항목을 확인한다.
+   어긋나는 항목이 있으면 `normalization_version`을 올리고 다시 돌린다
 
 정확한 상세 URL과 다운로드 URL은 로컬 운영 기록 `data/ACQUISITION_LOCAL.md`에 있다
 (저장소에 커밋되지 않는다).
